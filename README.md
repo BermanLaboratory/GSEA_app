@@ -8,25 +8,12 @@ library(DESeq2)
 library(tibble)
 library(dplyr)
 library(fgsea)
-
-# Load data
-rna <- read.csv("Uromol1_CountData.v1.csv", header = T, sep = ",", row.names = 1)
-uromol_clin <- read.csv("uromol_clinic.csv", sep = ",", header = T, row.names = 1)
-
-# Ensure that row names/column names in both dataframes are the same 
-uromol_clin <- uromol_clin[colnames(rna),]
-
-
-# Set grouping variable
-uromol_clin$isTa <- as.factor(ifelse(uromol_clin$Stage == "Ta", "Ta", "non_Ta"))
-levels(uromol_clin$isTa)
-
-#pathways
-pathways <- gmtPathways("~/mysigdb/h.all.v7.2.symbols.gmt")
+library(org.Hs.eg.db)
+library(data.table)
 
 
 
-# Update UI function
+# UI function
 ui <- fluidPage(
   titlePanel("DE Analysis App"),
   sidebarLayout(
@@ -35,16 +22,16 @@ ui <- fluidPage(
         tabPanel("Data Input", 
                  fileInput("rna", "Select RNA file"),
                  fileInput("uromol_clin", "Select clinical data file"),
-                 fileInput("pathways", "Select the gene set file (a gmt file)"),
+                 fileInput("pathways", "Select the gene set file (gmt file)"),
                  actionButton("run_analysis", "Run Analysis")
         ),
         tabPanel("DE result",
                  downloadButton("download_results", "Download Results")
         ),
         tabPanel("GSEA result", 
-                     downloadButton("downloadGSEA", "Download Results")
+                 downloadButton("downloadGSEA", "Download Results")
         ),
-        tabPanel("Plot Visualization",
+        tabPanel("Plots",
                  p("This panel is for plot visualization")
         )
       )
@@ -76,7 +63,7 @@ server <- function(input, output) {
     uromol_clin$isTa <- as.factor(ifelse(uromol_clin$Stage == "Ta", "Ta", "non_Ta"))
     
     # Return data frames
-    list(rna = rna, uromol_clin = uromol_clin)
+    list(rna = rna, uromol_clin = uromol_clin, pathways =pathways)
   })
   
   # Reactive expression for DE analysis
@@ -94,24 +81,20 @@ server <- function(input, output) {
     
     # Extract results
     res <- data.frame(results(dds))
-#    res <- cbind(as.data.frame(rowData(dds)), res)
-#    res <- res[, -duplicated(colnames(res))]
-#    res <- res %>% 
-#      filter(baseMean > 1) %>%
-#      mutate(log2FoldChange = log2FoldChange,
-#             adj_pval = padj)
+    #    res <- cbind(as.data.frame(rowData(dds)), res)
+    #    res <- res[, -duplicated(colnames(res))]
+    #    res <- res %>% 
+    #      filter(baseMean > 1) %>%
+    #      mutate(log2FoldChange = log2FoldChange,
+    #             adj_pval = padj)
     
     # Return DE results
     res
   })
   
-  # Read in gene set
-  pathways <- reactive({
-    req(input$pathways)
-    gmtPathways(input$pahways$datapath)
-  })
-  
+  # GSEA function
   res2_func <- reactive({
+    req(input$pathways)
     res <- de_analysis()
     res$row <- rownames(res)
     # Map Ensembl gene IDs to symbol. First create a mapping table.
@@ -125,7 +108,7 @@ server <- function(input, output) {
     
     # Joining
     res <- merge(data.frame(res), ens2symbol, by=c("row"))
-    # Remove the NAs, averaging statitics for a multi-hit symbol
+    # Remove the NAs, averaging statitics for a multi-hit symbols
     res2 <- res %>% 
       dplyr::select(SYMBOL, stat) %>% 
       na.omit() %>% 
@@ -136,14 +119,16 @@ server <- function(input, output) {
     # Creating a named vector [ranked genes]
     ranks <- res2$stat
     names(ranks) <- res2$SYMBOL
-    pathways = pathways()
     #Running fgsea algorithm:
-    fgseaRes <- fgseaMultilevel(pathways=pathways, stats=ranks)
+    fgseaRes <- fgseaMultilevel(pathways=data_input()$pathways, stats=ranks)
     
     # Tidy the results:
     fgseaResTidy <<- fgseaRes %>%
       as_tibble() %>%
       arrange(desc(NES)) # order by normalized enrichment score (NES)
+    
+    #Return data frame
+    as.data.frame(fgseaResTidy)
   })
   
   # Output DE analysis results
@@ -166,7 +151,7 @@ server <- function(input, output) {
       paste("fgsea_results", Sys.Date(), ".csv", sep="")
     },
     content = function(file) {
-      write.csv(fgseaResTidy, file, row.names = FALSE)
+      fwrite(res2_func(), file, row.names = FALSE)
     }
   )
   
