@@ -38,18 +38,11 @@ ui <- fluidPage(
                  fileInput("pathways", "Select the gene set file (a gmt file)"),
                  actionButton("run_analysis", "Run Analysis")
         ),
-        tabPanel("Analysis Output",
+        tabPanel("DE result",
                  downloadButton("download_results", "Download Results")
         ),
-        tabPanel("GSEA", 
-                 sidebarLayout(
-                   sidebarPanel(
-                   ),
-                   mainPanel(
-                     tableOutput("fgseaTable"),
+        tabPanel("GSEA result", 
                      downloadButton("downloadGSEA", "Download Results")
-                   )
-                 )
         ),
         tabPanel("Plot Visualization",
                  p("This panel is for plot visualization")
