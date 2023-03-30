@@ -9,7 +9,7 @@ library(tibble)
 library(dplyr)
 library(fgsea)
 library(org.Hs.eg.db)
-library(data.table)
+library(ggplot2)
 
 
 
@@ -32,7 +32,7 @@ ui <- fluidPage(
                  downloadButton("downloadGSEA", "Download Results")
         ),
         tabPanel("Plots",
-                 p("This panel is for plot visualization")
+                 plotOutput("myPlot")
         )
       )
     ),
@@ -88,14 +88,6 @@ server <- function(input, output) {
     #      mutate(log2FoldChange = log2FoldChange,
     #             adj_pval = padj)
     
-    # Return DE results
-    res
-  })
-  
-  # GSEA function
-  res2_func <- reactive({
-    req(input$pathways)
-    res <- de_analysis()
     res$row <- rownames(res)
     # Map Ensembl gene IDs to symbol. First create a mapping table.
     ens2symbol <- AnnotationDbi::select(org.Hs.eg.db,
@@ -128,7 +120,22 @@ server <- function(input, output) {
       arrange(desc(NES)) # order by normalized enrichment score (NES)
     
     #Return data frame
-    as.data.frame(fgseaResTidy)
+    list(res, fgseaResTidy)
+  })
+  
+  output$myPlot <- renderPlot({
+    
+    # Add code to generate the plot here
+    fgseaResTidy$adjPvalue <- ifelse(fgseaResTidy$padj <= 0.05, "significant", "non-significant")
+    cols <- c("non-significant" = "grey", "significant" = "red")
+    ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
+      geom_col() +
+      scale_fill_manual(values = cols) +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+      coord_flip() +
+      labs(x="Pathway", y="Normalized Enrichment Score",
+           title="Hallmark pathways Enrichment Score from GSEA")
+    
   })
   
   # Output DE analysis results
@@ -143,7 +150,7 @@ server <- function(input, output) {
       paste("DE_results_", Sys.Date(), ".csv", sep="")
     },
     content = function(file) {
-      write.csv(de_analysis(), file, row.names = F)
+      write.csv(de_analysis()[[1]], file, row.names = F)
     }
   )
   output$downloadGSEA <- downloadHandler(
@@ -151,7 +158,7 @@ server <- function(input, output) {
       paste("fgsea_results", Sys.Date(), ".csv", sep="")
     },
     content = function(file) {
-      fwrite(res2_func(), file, row.names = FALSE)
+      write.csv(apply(de_analysis()[[2]],2,as.character), file, row.names = FALSE)
     }
   )
   
