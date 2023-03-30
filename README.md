@@ -10,6 +10,10 @@ library(dplyr)
 library(fgsea)
 library(org.Hs.eg.db)
 library(ggplot2)
+library(tidyr)
+library(reshape2)
+library(ComplexHeatmap)
+library(circlize)
 
 
 
@@ -32,7 +36,9 @@ ui <- fluidPage(
                  downloadButton("downloadGSEA", "Download Results")
         ),
         tabPanel("Plots",
-                 plotOutput("myPlot")
+                 plotOutput("plot1"),
+                 plotOutput("plot2"),
+                 plotOutput("plot3")
         )
       )
     ),
@@ -118,15 +124,14 @@ server <- function(input, output) {
     fgseaResTidy <<- fgseaRes %>%
       as_tibble() %>%
       arrange(desc(NES)) # order by normalized enrichment score (NES)
-    
-    #Return data frame
-    list(res, fgseaResTidy)
-  })
-  
-  output$myPlot <- renderPlot({
-    
-    # Add code to generate the plot here
     fgseaResTidy$adjPvalue <- ifelse(fgseaResTidy$padj <= 0.05, "significant", "non-significant")
+    #Return data frame
+    list(res, fgseaResTidy, fgseaRes, ranks)
+  })
+  # plot 1 output
+  output$plot1 <- renderPlot({
+    fgseaResTidy <- de_analysis()[[2]]
+    # Add code to generate the plot here
     cols <- c("non-significant" = "grey", "significant" = "red")
     ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES, fill = adjPvalue)) +
       geom_col() +
@@ -137,11 +142,140 @@ server <- function(input, output) {
            title="Hallmark pathways Enrichment Score from GSEA")
     
   })
+  #plot2 output
+  output$plot2 <- renderPlot({
+    ranks <- de_analysis()[[4]]
+    pathways <- data_input()$pathways
+    fgseaRes <- de_analysis()[[3]]
+    
+    plotGseaTable(pathways[fgseaRes$pathway[fgseaRes$padj < 0.05]], ranks, fgseaRes, 
+                  gseaParam=0.5)
+    
+  })
+  
+  #plot3 output
+  output$plot3 <- renderPlot({
+    # defining variables
+    res <- de_analysis()[[1]]
+    pathways <- data_input()$pathways
+    fgseaResTidy <- de_analysis()[[2]]
+    fgseaRes <- de_analysis()[[3]]
+    # To see what genes are in each of these pathways:
+    gene.in.pathway <- pathways %>% 
+      enframe("pathway", "SYMBOL") %>% 
+      unnest(cols = c(SYMBOL)) %>% 
+      inner_join(res, by="SYMBOL")
+    
+    # pathways with significant enrichment score
+    sig.path <- fgseaResTidy$pathway[fgseaResTidy$adjPvalue == "significant"]
+    sig.gen <- unique(na.omit(gene.in.pathway$SYMBOL[gene.in.pathway$pathway %in% sig.path]))
+    
+    ### create a new data-frame that has '1' for when a gene is part of a term, and '0' when not
+    h.dat <- dcast(gene.in.pathway[, c(1,2)], SYMBOL~pathway)
+    rownames(h.dat) <- h.dat$SYMBOL
+    h.dat <- h.dat[, -1]
+    
+    h.dat <- h.dat[rownames(h.dat) %in% sig.gen, ]
+    h.dat <- h.dat[, colnames(h.dat) %in% sig.path]
+    
+    # keep those genes with 3  or more occurrences
+    #table(data.frame(rowSums(h.dat)))
+    
+    # 1       2    3    4    5    6 
+    # 1604  282   65   11    1    1 
+    #h.dat <- h.dat[data.frame(rowSums(h.dat)) >= 3, ]
+    num_non_na <- apply(h.dat, 1, function(x) sum(!is.na(x)))
+    h.dat <- h.dat[num_non_na >=3, ]
+    
+    #
+    topTable <- res[res$SYMBOL %in% rownames(h.dat), ]
+    rownames(topTable) <- topTable$SYMBOL
+    
+    # match the order of rownames in toptable with that of h.dat
+    topTableAligned <- topTable[which(rownames(topTable) %in% rownames(h.dat)),]
+    topTableAligned <- topTableAligned[match(rownames(h.dat), rownames(topTableAligned)),]
+    #all(rownames(topTableAligned) == rownames(h.dat))
+    
+    # colour bar for -log10(adjusted p-value) for sig.genes
+    dfMinusLog10FDRGenes <- data.frame(-log10(
+      topTableAligned[which(rownames(topTableAligned) %in% rownames(h.dat)), 'padj']))
+    dfMinusLog10FDRGenes[dfMinusLog10FDRGenes == 'Inf'] <- 0
+    
+    # colour bar for fold changes for sigGenes
+    dfFoldChangeGenes <- data.frame(
+      topTableAligned[which(rownames(topTableAligned) %in% rownames(h.dat)), 'log2FoldChange'])
+    
+    # merge both
+    dfGeneAnno <- data.frame(dfMinusLog10FDRGenes, dfFoldChangeGenes)
+    colnames(dfGeneAnno) <- c('Gene score', 'Log2FC')
+    
+    dfGeneAnno[,2] <- ifelse(dfGeneAnno$Log2FC > 0, 'Up-regulated',
+                             ifelse(dfGeneAnno$Log2FC < 0, 'Down-regulated', 'Unchanged'))
+    colours <- list(
+      'Log2FC' = c('Up-regulated' = 'royalblue', 'Down-regulated' = 'yellow'))
+    haGenes <- rowAnnotation(
+      df = dfGeneAnno,
+      col = colours,
+      width = unit(1,'cm'),
+      annotation_name_side = 'top')
+    
+    # Now a separate colour bar for the GSEA enrichment padj. This will 
+    # also contain the enriched term names via annot_text()
+    
+    # colour bar for enrichment score from fgsea results
+    dfEnrichment <- fgseaRes[, c("pathway", "NES")]
+    dfEnrichment <- dfEnrichment[dfEnrichment$pathway %in% colnames(h.dat)]
+    dd <- dfEnrichment$pathway
+    dfEnrichment <- dfEnrichment[, -1]
+    rownames(dfEnrichment) <- dd
+    
+    colnames(dfEnrichment) <- 'Normalized\n Enrichment score'
+    haTerms <- HeatmapAnnotation(
+      df = dfEnrichment,
+      Term = anno_text(
+        colnames(h.dat),
+        rot = 45,
+        just = 'right',
+        gp = gpar(fontsize = 12)),
+      annotation_height = unit.c(unit(1, 'cm'), unit(8, 'cm')),
+      annotation_name_side = 'left')
+    
+    # now generate the heatmap
+    hmapGSEA <- Heatmap(h.dat,
+                        name = 'GSEA hallmark pathways enrichment',
+                        split = dfGeneAnno[,2],
+                        col = c('0' = 'white', '1' = 'forestgreen'),
+                        rect_gp = gpar(col = 'grey85'),
+                        cluster_rows = TRUE,
+                        show_row_dend = TRUE,
+                        row_title = 'Top Genes',
+                        row_title_side = 'left',
+                        row_title_gp = gpar(fontsize = 11, fontface = 'bold'),
+                        row_title_rot = 90,
+                        show_row_names = TRUE,
+                        row_names_gp = gpar(fontsize = 11, fontface = 'bold'),
+                        row_names_side = 'left',
+                        row_dend_width = unit(35, 'mm'),
+                        cluster_columns = TRUE,
+                        show_column_dend = TRUE,
+                        column_title = 'Enriched terms',
+                        column_title_side = 'top',
+                        column_title_gp = gpar(fontsize = 12, fontface = 'bold'),
+                        column_title_rot = 0,
+                        show_column_names = FALSE,
+                        show_heatmap_legend = FALSE,
+                        clustering_distance_columns = 'euclidean',
+                        clustering_method_columns = 'ward.D2',
+                        clustering_distance_rows = 'euclidean',
+                        clustering_method_rows = 'ward.D2',
+                        bottom_annotation = haTerms)
+    
+  })
   
   # Output DE analysis results
   output$summary <- renderPrint({
     req(input$run_analysis)
-    de_analysis()
+    de_analysis()[[2]]
   })
   
   # Download results
