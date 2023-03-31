@@ -1,66 +1,3 @@
-# GSEA_app
-
-## Purpose
-This Shiny app performs differential expression (DE) analysis and gene set enrichment analysis (GSEA) on RNA-seq data. The app requires three input files: an RNA-seq count matrix file (rna), a clinical data file (clin), and a gene set file (pathways). The app uses the DESeq2 package for DE analysis and the fgsea package for GSEA analysis.
-
-## Input Requirements
-
-### RNA-seq count matrix file (rna)
-
-- File format: CSV file
-- File name: A user-defined name for the file
-- File contents: A raw count matrix with samples in columns and genes in rows. Genes should be presented in Ensembl gene IDs.
-
-### Clinical data file (clin)
-
-- File format: CSV file
-- File name: A user-defined name for the file
-- File contents: Clinical data for each sample, with samples in rows and clinical variables in columns. The file must have at least one column named group where the user defines the groups that they want to compare. The group variable must be a factor with two levels, such as "tumor" and "normal".
-
-### Gene set file (pathways)
-
-- File format: GMT file
-- File name: A user-defined name for the file
-- File contents: A gene set file in GMT format. The file must contain one gene set per line, with the first column being the gene set name, the second column being a description of the gene set, and subsequent columns being Ensembl gene IDs belonging to the gene set.
-
-## Output
-The app produces three types of outputs: DE results, GSEA results, and plots.
-
-### DE results
-
-- File format: CSV file
-- File contents: A table of DE analysis results, including log2 fold change, adjusted p-value, and Ensembl gene IDs. The results are sorted by adjusted p-value.
-
-### GSEA results
-- File format: CSV file
-- File contents: A table of GSEA results, including normalized enrichment score (NES), false discovery rate (FDR), and gene set name. The results are sorted by NES.
-
-### Plots
-
-- Plot 1: A bar plot of the GSEA results, with gene sets sorted by NES and colored by adjusted p-value.
-
-- Plot 2: An enrichment plot for significantly enriched pathways.
-
-- Plot 3: A heatmap plot for genes in significantly enriched pathways
-
-### Required R Packages
-```
-shiny
-DESeq2
-tibble
-dplyr
-fgsea
-org.Hs.eg.db
-ggplot2
-tidyr
-reshape2
-ComplexHeatmap
-circlize 
-```
-
-App contents, also can be found as `first_app.R` in the repo:
-
-```R
 library(shiny)
 library(DESeq2)
 library(tibble)
@@ -354,4 +291,3 @@ server <- function(input, output) {
 
 # Run the app
 shinyApp(ui, server)
-```
